@@ -69,8 +69,9 @@ const CheckoutPage = () => {
                     const res = await fetch('/api/paypal-create-order', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ amount: (price * 1.10).toFixed(2) })
+                        body: JSON.stringify({ amount: (price).toFixed(2) })
                     });
+                
                     const data = await res.json();
                     setLoading(false);
                     if (!res.ok) {

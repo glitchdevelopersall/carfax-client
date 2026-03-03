@@ -15,6 +15,7 @@ const AdminDashboard = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [generatingPdfId, setGeneratingPdfId] = useState(null);
+    const [statusUpdating, setStatusUpdating] = useState({}); // track per-order update status
 
     // 1. CHECK LOGIN STATUS ON LOAD
     useEffect(() => {
@@ -126,6 +127,36 @@ const AdminDashboard = () => {
         setGeneratingPdfId(null);
     };
 
+    // 6. UPDATE ORDER STATUS
+    const handleStatusChange = async (id, newStatus) => {
+        setStatusUpdating(prev => ({ ...prev, [id]: true }));
+        const token = localStorage.getItem('adminToken');
+        try {
+            const response = await fetch(`/api/update-order/${id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ payment_status: newStatus })
+            });
+            if (response.ok) {
+                setOrders(prev =>
+                    prev.map(o => (o.id === id ? { ...o, payment_status: newStatus } : o))
+                );
+            } else {
+                const data = await response.json();
+                console.error('status update failed', data);
+                alert('Failed to update status');
+            }
+        } catch (err) {
+            console.error('status update error', err);
+            alert('Error updating status');
+        } finally {
+            setStatusUpdating(prev => ({ ...prev, [id]: false }));
+        }
+    };
+
     // --- RENDER LOGIN SCREEN ---
     if (!isAuthenticated) {
         return (
@@ -202,7 +233,7 @@ const AdminDashboard = () => {
             <main className="max-w-7xl mx-auto px-4 py-8">
                 <div className="bg-white rounded-lg shadow overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-                        <h2 className="font-semibold text-gray-700">Paid Orders</h2>
+                        <h2 className="font-semibold text-gray-700">Orders</h2>
                         <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
                             {orders.length} Orders
                         </span>
@@ -216,6 +247,7 @@ const AdminDashboard = () => {
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">VIN</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
                                 </tr>
                             </thead>
@@ -235,6 +267,18 @@ const AdminDashboard = () => {
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                             ${order.price}
                                         </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            <select
+                                                value={order.payment_status || ''}
+                                                onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                                                disabled={statusUpdating[order.id]}
+                                                className="border border-gray-300 rounded p-1 text-sm"
+                                            >
+                                                <option value="Pending">Pending</option>
+                                                <option value="Success">Success</option>
+                                                <option value="Failed">Failed</option>
+                                            </select>
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                             <button
                                                 onClick={() => generateReport(order.vin)}
@@ -253,7 +297,7 @@ const AdminDashboard = () => {
                                 ))}
                                 {orders.length === 0 && (
                                     <tr>
-                                        <td colSpan="5" className="px-6 py-10 text-center text-gray-400">
+                                        <td colSpan="6" className="px-6 py-10 text-center text-gray-400">
                                             No orders found.
                                         </td>
                                     </tr>

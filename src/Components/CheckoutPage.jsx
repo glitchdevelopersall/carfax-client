@@ -15,8 +15,8 @@ const CheckoutPage = () => {
         vin = "1FM5K8D87TESTVIN",
     } = location.state || {};
 
-    const [loading, setLoading] = useState(false);
     const [termsAccepted, setTermsAccepted] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     // Form Data
     const [formData, setFormData] = useState({
@@ -30,142 +30,70 @@ const CheckoutPage = () => {
         confirmEmail: ''
     });
 
-
     // Pre-fill VIN
     useEffect(() => {
         if (vin) setFormData(prev => ({ ...prev, vinNo: vin }));
     }, [vin]);
 
-    // Load PayPal SDK and render buttons once.  To avoid the "delegate rendering" error
-    // we only initialize the SDK a single time and clear the container on every render attempt
-    // rather than letting the library try to mount multiple instances into the same node.
-    // Also we keep refs for mutable state so that the one Buttons instance always reads
-    // up-to-date values without re-creating itself on every keystroke.
+    // mapping for the three fixed PayPal links
+    const linkMap = {
+        45: 'https://www.paypal.com/ncp/payment/JNQL58DH9NY8L',
+        75: 'https://www.paypal.com/ncp/payment/6T5H69FWCTW2Q',
+        100: 'https://www.paypal.com/ncp/payment/Y9VFYLBB2QKSW'
+    };
+    const checkoutUrl = linkMap[price] || linkMap[45];
 
-    const termsRef = React.useRef(termsAccepted);
-    const formRef = React.useRef(formData);
-    useEffect(() => { termsRef.current = termsAccepted; }, [termsAccepted]);
-    useEffect(() => { formRef.current = formData; }, [formData]);
-
-    useEffect(() => {
-        const renderButtons = () => {
-            // wipe container in case a previous render left things behind
-            const container = document.getElementById('paypal-buttons-container');
-            if (container) container.innerHTML = '';
-
-            window.paypal.Buttons({
-                createOrder: async () => {
-                    const terms = termsRef.current;
-                    const form = formRef.current;
-                    if (!terms) {
-                        alert('Please accept the conditions of use.');
-                        throw new Error('Terms not accepted');
-                    }
-                    if (form.email !== form.confirmEmail) {
-                        alert('Emails do not match!');
-                        throw new Error('Emails mismatch');
-                    }
-                    setLoading(true);
-                    const res = await fetch('/api/paypal-create-order', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ amount: (price).toFixed(2) })
-                    });
-                
-                    const data = await res.json();
-                    setLoading(false);
-                    if (!res.ok) {
-                        console.error('server error creating order', data);
-                        throw new Error(data.error || data.details || 'create-order failed');
-                    }
-                    if (!data.id) {
-                        console.error('no order id', data);
-                        throw new Error('No order id returned');
-                    }
-                    return data.id;
-                },
-                onApprove: async (data) => {
-                    await handleDirectOrder(data.orderID);
-                },
-                onError: (err) => {
-                    console.error('PayPal Buttons error', err);
-                    alert('PayPal error occurred');
-                }
-            }).render('#paypal-buttons-container');
-        };
-
-        const existing = document.getElementById('paypal-sdk');
-        if (window.paypal && window.paypal.Buttons) {
-            // SDK already loaded and ready
-            renderButtons();
-            return;
-        }
-
-        if (!existing) {
-            const script = document.createElement('script');
-            script.id = 'paypal-sdk';
-            const paypalEnv = import.meta.env.VITE_PAYPAL_ENV || 'production';
-            let src = `https://www.paypal.com/sdk/js?client-id=${import.meta.env.VITE_PAYPAL_CLIENT_ID}&currency=USD&intent=capture`;
-            script.src = src;
-            script.onload = renderButtons;
-            script.onerror = (e) => console.error('PayPal SDK failed to load', e);
-            document.body.appendChild(script);
-        } else {
-            // script tag exists but may still be loading
-            existing.addEventListener('load', renderButtons);
-            // clean up listener if unmounting
-            return () => existing.removeEventListener('load', renderButtons);
-        }
-    }, [price]);
-
-    // legacy capture code removed
     // Handlers
     const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!termsAccepted) {
+            alert('Please accept the conditions of use.');
+            return;
+        }
+        if (formData.email !== formData.confirmEmail) {
+            alert('Emails do not match!');
+            return;
+        }
 
-    // 2. SUBMIT ORDER (handled by PayPal Buttons)
-    const handleDirectOrder = async (orderID) => {
-        // orderID supplied by PayPal SDK after approval
-        setLoading(true);
-
+        // save order data with pending status
+        setSaving(true);
         try {
-            const captureRes = await fetch("/api/paypal-capture-order", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ orderID })
-            });
-            const captureData = await captureRes.json();
-            if (!captureData.success) throw new Error('Capture failed');
-
-            // read the freshest data from the ref rather than the closed-over state
-            const current = formRef.current;
-            const orderPayload = {
-                full_name: current.full_name,
-                email: current.email,
-                address: current.address,
-                city: current.city,
-                province: current.province,
-                postal_code: current.postal_code,
-                vin: current.vinNo,
+            const payload = {
+                full_name: formData.full_name,
+                email: formData.email,
+                address: formData.address,
+                city: formData.city,
+                province: formData.province,
+                postal_code: formData.postal_code,
+                vin: formData.vinNo,
                 plan_name: planName,
                 price: price,
-                payment_status: "PAID"
+                payment_status: 'Pending'
             };
 
-            await fetch("/api/create-order", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(orderPayload)
+            const res = await fetch('/api/create-order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
-
-            alert("✅ Payment Successful!");
-            navigate("/success");
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                console.error('order save failed', data);
+                alert('Could not save order. Please try again.');
+                return;
+            }
         } catch (err) {
-            console.error(err);
-            alert("Payment error occurred");
+            console.error('save order error', err);
+            alert('Unable to save order before redirect.');
+            return;
         } finally {
-            setLoading(false);
+            setSaving(false);
         }
+
+        // redirect to the PayPal checkout link
+        window.location.href = checkoutUrl;
     };
 
     return (
@@ -185,7 +113,7 @@ const CheckoutPage = () => {
 
                 {/* LEFT: FORM */}
                 <div className="lg:col-span-7 order-2 lg:order-1">
-                    <form onSubmit={handleDirectOrder}>
+                    <form onSubmit={handleSubmit}>
 
                         {/* CUSTOMER INFO */}
                         <div className="mb-10">
@@ -244,8 +172,14 @@ const CheckoutPage = () => {
                             <label htmlFor="terms" className="ml-3 text-sm text-gray-600">I agree to Conditions of Use</label>
                         </div>
 
-                        {/* PayPal button container (Pay Now text removed; SDK handles UI) */}
-                        <div id="paypal-buttons-container" className="w-full" />
+                        {/* Direct PayPal link instead of SDK button */}
+                        <button
+                            type="submit"
+                            disabled={saving}
+                            className="w-full bg-blue-600 text-white py-3 rounded-md hover:opacity-90 transition disabled:opacity-50"
+                        >
+                            {saving ? 'Saving...' : `Pay ${price.toFixed(2)} via PayPal`}
+                        </button>
                     </form>
                 </div>
 

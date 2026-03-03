@@ -122,6 +122,28 @@ app.get('/api/get-orders', requireAdmin, async (req, res) => {
   }
 });
 
+// patch endpoint to update order fields (e.g. payment_status)
+app.patch('/api/update-order/:id', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .update(updates)
+      .eq('id', id)
+      .select();
+
+    if (error) {
+      throw error;
+    }
+    res.json({ success: true, order: data[0] });
+  } catch (err) {
+    console.error('Update Order Error:', err.message);
+    res.status(500).json({ error: 'Unable to update order', details: err.message });
+  }
+});
+
 // protected endpoint to generate a PDF vehicle report
 app.post('/api/generate-report', requireAdmin, async (req, res) => {
   const { vin } = req.body;
